@@ -1,4 +1,5 @@
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 import { issueVoucherOnChain, sha256 } from "@/lib/anchor-client";
@@ -47,14 +48,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: dbError?.message || "DB error" }, { status: 500 });
     }
 
-    // Write to Solana (or mock chain)
-    const chainResult = await issueVoucherOnChain({
-      voucherId,
-      orgId: org_id,
-      category,
-      valueCents: value_cents,
-      unitCount: unit_count || 1,
-    });
+    let chainResult;
+    try {
+      chainResult = await issueVoucherOnChain({
+        voucherId,
+        orgId: org_id,
+        category,
+        valueCents: value_cents,
+        unitCount: unit_count || 1,
+      });
+    } catch (chainError) {
+      await db.from("vouchers").delete().eq("id", voucherId);
+      throw chainError;
+    }
 
     // Update Supabase with on-chain sig
     await db
@@ -69,7 +75,7 @@ export async function POST(req: NextRequest) {
       metadata: { org_id, category, value_cents, on_chain_sig: chainResult.signature },
     });
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || new URL(req.url).origin;
     const qrUrl = `${baseUrl}/voucher/${voucherId}?t=${claimToken}`;
 
     return NextResponse.json({

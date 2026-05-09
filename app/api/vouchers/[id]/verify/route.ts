@@ -1,6 +1,8 @@
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
+import { timingSafeEqual } from "crypto";
 
 export async function POST(
   req: NextRequest,
@@ -16,8 +18,8 @@ export async function POST(
     .eq("id", params.id)
     .single();
 
-  // Constant-time match is not possible in JS without Buffer.timingSafeEqual
-  // but this endpoint only confirms match/no-match; it doesn't reveal the token
-  const valid = !!data && data.claim_token === claim_token;
+  const valid = !!data &&
+    data.claim_token.length === claim_token.length &&
+    timingSafeEqual(Buffer.from(data.claim_token), Buffer.from(claim_token));
   return NextResponse.json({ valid });
 }

@@ -1,8 +1,10 @@
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 import { redeemVoucherOnChain } from "@/lib/anchor-client";
 import type { Voucher } from "@/lib/supabase";
+import { timingSafeEqual } from "crypto";
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,7 +31,11 @@ export async function POST(req: NextRequest) {
     }
 
     // Constant-time comparison to prevent timing attacks
-    const tokenMatch = voucher.claim_token === claim_token;
+    const storedToken = Buffer.from(voucher.claim_token);
+    const providedToken = Buffer.from(claim_token);
+    const tokenMatch =
+      storedToken.length === providedToken.length &&
+      timingSafeEqual(storedToken, providedToken);
     if (!tokenMatch) {
       return NextResponse.json({ error: "Invalid claim token" }, { status: 403 });
     }
