@@ -4,14 +4,20 @@ import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 
 type Vendor = { id: string; name: string; category: string; pending_payout_cents: number };
 type VoucherPreview = { id: string; category: string; value_cents: number; unit_count: number; status: string; expires_at: string };
 type RedeemResult = { success: boolean; on_chain_sig: string; explorer_url: string; value_cents: number };
 
-const CATEGORY_ICONS: Record<string, string> = { meals: "🍽️", hygiene: "🧴", transit: "🚌", laundry: "👕" };
-const CATEGORY_LABELS: Record<string, string> = { meals: "Meals", hygiene: "Hygiene", transit: "Transit", laundry: "Laundry" };
+const CAT: Record<string, { icon: string; label: string; dark: string; glow: string; pill: string }> = {
+  meals:   { icon: "🍽️", label: "Meals",   dark: "from-orange-900/60 to-amber-900/40",  glow: "shadow-orange-900/40",  pill: "bg-orange-500/20 text-orange-300 border-orange-500/30" },
+  hygiene: { icon: "🧴", label: "Hygiene", dark: "from-purple-900/60 to-violet-900/40", glow: "shadow-purple-900/40", pill: "bg-purple-500/20 text-purple-300 border-purple-500/30" },
+  transit: { icon: "🚌", label: "Transit", dark: "from-sky-900/60 to-blue-900/40",      glow: "shadow-sky-900/40",    pill: "bg-sky-500/20 text-sky-300 border-sky-500/30"          },
+  laundry: { icon: "👕", label: "Laundry", dark: "from-teal-900/60 to-emerald-900/40",  glow: "shadow-teal-900/40",   pill: "bg-teal-500/20 text-teal-300 border-teal-500/30"       },
+};
+
+type AppState = "idle" | "preview" | "success" | "double_redeem";
 
 export default function VendorPage() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -21,13 +27,14 @@ export default function VendorPage() {
   const [voucherId, setVoucherId] = useState<string | null>(null);
   const [claimToken, setClaimToken] = useState<string | null>(null);
   const [redeemResult, setRedeemResult] = useState<RedeemResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [appState, setAppState] = useState<AppState>("idle");
+  const [errorMsg, setErrorMsg] = useState("");
   const [scanning, setScanning] = useState(false);
   const [confirming, setConfirming] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const scannerRef = useRef<any>(null);
 
-  const selectedVendor = vendors.find((v) => v.id === selectedVendorId);
+  const selectedVendor = vendors.find(v => v.id === selectedVendorId);
 
   useEffect(() => {
     fetch("/api/orgs/vendors").then(r => r.json()).then(d => {
@@ -37,7 +44,13 @@ export default function VendorPage() {
     });
   }, []);
 
-  function parseQrUrl(raw: string): { voucherId: string; token: string } | null {
+  function reset() {
+    setAppState("idle"); setPreview(null);
+    setVoucherId(null); setClaimToken(null);
+    setRedeemResult(null); setManualCode(""); setErrorMsg("");
+  }
+
+  function parseQrUrl(raw: string) {
     try {
       const url = new URL(raw);
       const parts = url.pathname.split("/");
@@ -52,30 +65,27 @@ export default function VendorPage() {
   }
 
   async function handleQrData(raw: string) {
-    setError(null);
     const parsed = parseQrUrl(raw.trim());
-    if (!parsed) { setError("Could not parse QR code. Try manual entry."); return; }
+    if (!parsed) { setErrorMsg("Could not parse QR code."); return; }
     const res = await fetch(`/api/vouchers/${parsed.voucherId}`);
     const data = await res.json();
-    if (data.error) { setError(data.error); return; }
+    if (data.error) { setErrorMsg(data.error); return; }
     setVoucherId(parsed.voucherId);
     setClaimToken(parsed.token);
     setPreview(data);
-    setRedeemResult(null);
+    setAppState("preview");
   }
 
   async function startScanner() {
-    if (!document.getElementById("qr-scanner-div")) return;
     setScanning(true);
     const { Html5Qrcode } = await import("html5-qrcode");
-    const scanner = new Html5Qrcode("qr-scanner-div");
+    const scanner = new Html5Qrcode("qr-reader");
     scannerRef.current = scanner;
     try {
-      await scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 },
-        (decodedText: string) => { scanner.stop(); setScanning(false); handleQrData(decodedText); },
-        undefined
-      );
-    } catch { setScanning(false); setError("Camera access denied. Use manual entry."); }
+      await scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 220 },
+        (text: string) => { scanner.stop(); setScanning(false); handleQrData(text); },
+        undefined);
+    } catch { setScanning(false); setErrorMsg("Camera denied. Use manual entry."); }
   }
 
   async function stopScanner() {
@@ -86,7 +96,6 @@ export default function VendorPage() {
   async function confirmRedeem() {
     if (!voucherId || !claimToken || !selectedVendorId) return;
     setConfirming(true);
-    setError(null);
     try {
       const res = await fetch("/api/redeem", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -95,176 +104,249 @@ export default function VendorPage() {
       const data = await res.json();
       if (!res.ok) {
         if (data.code === "ALREADY_REDEEMED") {
-          setError("ALREADY_REDEEMED");
-          toast.error("Already Redeemed", { description: "The blockchain prevented double-spending.", duration: 6000 });
+          setAppState("double_redeem");
+          toast.error("Already Redeemed", { description: "The blockchain prevented double-spending." });
         } else {
-          setError(data.error || "Redemption failed");
+          setErrorMsg(data.error || "Redemption failed");
         }
         return;
       }
       setRedeemResult(data);
-      setPreview(null);
+      setAppState("success");
       toast.success("Redeemed!", { description: <a href={data.explorer_url} target="_blank" rel="noopener noreferrer" className="underline">View on-chain proof →</a> });
       fetch("/api/orgs/vendors").then(r => r.json()).then(d => setVendors(d.vendors || []));
     } finally { setConfirming(false); }
   }
 
-  function reset() {
-    setRedeemResult(null); setPreview(null); setVoucherId(null);
-    setClaimToken(null); setManualCode(""); setError(null);
-  }
+  const cat = preview ? (CAT[preview.category] ?? { icon: "🎟️", label: preview.category, dark: "from-slate-800 to-slate-800", glow: "", pill: "bg-white/10 text-white/60 border-white/10" }) : null;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 px-6 py-4">
-        <div className="max-w-lg mx-auto flex items-center justify-between">
+    <div className="min-h-screen bg-slate-950 flex flex-col">
+
+      {/* Gradient hero header */}
+      <div className="gradient-brand px-5 pt-5 pb-7">
+
+        {/* Nav row */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-md bg-white/20 backdrop-blur flex items-center justify-center">
+              <span className="text-white font-black text-xs">RL</span>
+            </div>
+            <span className="text-white font-bold">Relief Ledger</span>
+            <span className="text-white/30">/</span>
+            <span className="text-blue-200 text-sm">Vendor</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-emerald-300 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Solana Devnet
+          </div>
+        </div>
+
+        {/* Vendor name + switch */}
+        <div className="flex items-center justify-between gap-3 mb-4">
           <div>
-            <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Vendor Portal</p>
-            <p className="font-semibold text-slate-900">Relief Ledger</p>
+            <p className="text-blue-200/70 text-xs font-medium uppercase tracking-widest">Active vendor</p>
+            <p className="text-white font-black text-2xl mt-1 leading-none">
+              {selectedVendor?.name ?? "—"}
+            </p>
           </div>
-          {selectedVendor && (
-            <div className="text-right">
-              <p className="text-xs text-slate-500">{selectedVendor.name}</p>
-              <p className="text-sm font-bold text-green-700">${(selectedVendor.pending_payout_cents / 100).toFixed(2)} pending</p>
-            </div>
-          )}
-        </div>
-      </header>
-
-      <div className="max-w-lg mx-auto px-4 py-6 space-y-4">
-
-        {/* Vendor selector */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-          <p className="text-sm font-semibold text-slate-700 mb-2">Vendor</p>
-          <Select value={selectedVendorId} onValueChange={(v) => v && setSelectedVendorId(v)}>
-            <SelectTrigger><SelectValue placeholder="Select vendor..." /></SelectTrigger>
-            <SelectContent>
-              {vendors.map((v) => (
-                <SelectItem key={v.id} value={v.id}>
-                  <span className="flex items-center gap-2">{CATEGORY_ICONS[v.category]} {v.name}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {selectedVendor && (
-            <div className="mt-3 flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-4 py-2.5">
-              <span className="text-sm text-green-800">Pending reimbursement</span>
-              <span className="text-lg font-bold text-green-700">${(selectedVendor.pending_payout_cents / 100).toFixed(2)}</span>
-            </div>
+          {vendors.length > 1 && (
+            <Select value={selectedVendorId} onValueChange={v => v && setSelectedVendorId(v)}>
+              <SelectTrigger className="h-7 px-3 bg-white/15 border-white/20 text-white text-xs rounded-full w-auto">
+                <span className="pr-1">Switch</span>
+              </SelectTrigger>
+              <SelectContent>
+                {vendors.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           )}
         </div>
 
-        {/* Scanner */}
-        {!preview && !redeemResult && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-5 pt-5 pb-3">
-              <p className="font-semibold text-slate-900">Scan QR Code</p>
-              <p className="text-sm text-slate-500 mt-0.5">Point camera at printed voucher card</p>
-            </div>
-            <div id="qr-scanner-div" className="w-full" />
-            <div className="px-5 pb-5 pt-3 space-y-3">
-              {!scanning ? (
-                <Button onClick={startScanner} className="w-full bg-slate-900 hover:bg-slate-800 font-semibold">
-                  Start Camera
-                </Button>
-              ) : (
-                <Button variant="outline" onClick={stopScanner} className="w-full">Stop Camera</Button>
-              )}
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200" /></div>
-                <div className="relative text-center"><span className="bg-white px-3 text-xs text-slate-400">or enter manually</span></div>
+        {/* Payout card */}
+        {selectedVendor && (
+          <div className="bg-white/10 border border-white/15 rounded-2xl px-5 py-4 flex items-center justify-between">
+            <p className="text-blue-200 text-sm font-medium">Pending reimbursement</p>
+            <p className="text-white font-black text-3xl tabular-nums leading-none">
+              ${(selectedVendor.pending_payout_cents / 100).toFixed(2)}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Main area */}
+      <div className="flex-1 px-4 py-5 flex flex-col gap-4 max-w-lg mx-auto w-full">
+
+        {/* IDLE: scanner */}
+        {appState === "idle" && (
+          <div className="space-y-3">
+
+            {/* Scanner panel */}
+            <div className="bg-slate-900 rounded-2xl overflow-hidden border border-white/10">
+              <div className="px-5 pt-5 pb-2 flex items-center justify-between">
+                <div>
+                  <p className="text-white font-bold">Scan Voucher</p>
+                  <p className="text-slate-400 text-xs mt-0.5">Point camera at printed card</p>
+                </div>
+                {scanning && (
+                  <span className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Scanning
+                  </span>
+                )}
               </div>
+
+              <div className="relative mx-5 mb-2">
+                {!scanning && (
+                  <div className="h-52 bg-slate-800/80 rounded-xl border border-white/5 flex items-center justify-center">
+                    <div className="relative w-32 h-32">
+                      <span className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-blue-400 rounded-tl" />
+                      <span className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-blue-400 rounded-tr" />
+                      <span className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-blue-400 rounded-bl" />
+                      <span className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-blue-400 rounded-br" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <p className="text-3xl opacity-30">⬛</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div id="qr-reader" className={scanning ? "w-full rounded-xl overflow-hidden" : "hidden"} />
+              </div>
+
+              <div className="p-4 pt-2">
+                {!scanning ? (
+                  <Button onClick={startScanner} className="w-full gradient-brand text-white font-bold py-5 border-0 hover:opacity-90 rounded-xl">
+                    Start Camera
+                  </Button>
+                ) : (
+                  <Button onClick={stopScanner} variant="outline" className="w-full border-slate-700 text-slate-300 hover:bg-slate-800 rounded-xl">
+                    Stop Camera
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Manual entry */}
+            <div className="bg-slate-900 rounded-2xl border border-white/10 px-5 py-4">
+              <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mb-3">Manual Entry</p>
               <div className="flex gap-2">
-                <Input placeholder="Paste voucher URL or code..." value={manualCode}
-                  onChange={(e) => setManualCode(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleQrData(manualCode)} />
-                <Button variant="outline" onClick={() => handleQrData(manualCode)}>Go</Button>
+                <Input value={manualCode} onChange={e => setManualCode(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleQrData(manualCode)}
+                  placeholder="Paste voucher URL or claim code..."
+                  className="bg-slate-800 border-slate-700 text-slate-200 placeholder:text-slate-600 text-sm rounded-xl" />
+                <Button onClick={() => handleQrData(manualCode)} variant="outline"
+                  className="border-slate-700 text-slate-300 hover:bg-slate-800 shrink-0 rounded-xl px-5">Go</Button>
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* Already redeemed error — big red for projector */}
-        {error === "ALREADY_REDEEMED" && (
-          <div className="bg-red-600 rounded-2xl p-6 text-center shadow-lg">
-            <div className="text-4xl mb-3">🚫</div>
-            <p className="text-white font-bold text-xl">Already Redeemed</p>
-            <p className="text-red-100 text-sm mt-2">This voucher was already used.<br />The blockchain prevented double-spending.</p>
-            <Button onClick={reset} variant="outline" className="mt-4 bg-transparent text-white border-white hover:bg-red-700 hover:text-white">
-              Scan Another
-            </Button>
-          </div>
-        )}
-
-        {/* Generic error */}
-        {error && error !== "ALREADY_REDEEMED" && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
-            <span className="text-red-500 text-lg">⚠️</span>
-            <div>
-              <p className="text-red-800 font-semibold text-sm">Error</p>
-              <p className="text-red-700 text-sm mt-0.5">{error}</p>
-            </div>
-            <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600 text-sm">✕</button>
-          </div>
-        )}
-
-        {/* Voucher preview */}
-        {preview && !redeemResult && error !== "ALREADY_REDEEMED" && (
-          <div className="bg-white rounded-2xl border-2 border-blue-300 shadow-md overflow-hidden">
-            <div className="bg-blue-50 px-5 py-4 flex items-center gap-4">
-              <div className="text-5xl">{CATEGORY_ICONS[preview.category] || "🎟️"}</div>
-              <div>
-                <p className="text-sm font-medium text-blue-700 uppercase tracking-wide">{CATEGORY_LABELS[preview.category]}</p>
-                <p className="text-4xl font-bold text-slate-900">${(preview.value_cents / 100).toFixed(2)}</p>
-                {preview.unit_count > 1 && <p className="text-sm text-slate-500">× {preview.unit_count} units</p>}
-              </div>
-            </div>
-            <div className="px-5 py-4 space-y-3">
-              <div className="flex justify-between text-sm text-slate-500">
-                <span>Expires</span>
-                <span>{new Date(preview.expires_at).toLocaleDateString()}</span>
-              </div>
-
-              {preview.status !== "issued" ? (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-center">
-                  <p className="text-amber-800 font-semibold">Cannot redeem — status: {preview.status}</p>
-                </div>
-              ) : (
-                <Button onClick={confirmRedeem} disabled={confirming}
-                  className="w-full bg-green-600 hover:bg-green-700 font-bold text-lg py-6">
-                  {confirming ? "Processing..." : "✓ Confirm Redeem"}
-                </Button>
-              )}
-              <Button variant="ghost" onClick={reset} className="w-full text-slate-400 text-sm">Cancel</Button>
-            </div>
-          </div>
-        )}
-
-        {/* Success state */}
-        {redeemResult && (
-          <div className="bg-white rounded-2xl border-2 border-green-300 shadow-md overflow-hidden">
-            <div className="bg-green-600 px-5 py-6 text-center">
-              <div className="text-5xl mb-2">✅</div>
-              <p className="text-white font-bold text-2xl">Redeemed!</p>
-              <p className="text-green-100 text-sm mt-1">${(redeemResult.value_cents / 100).toFixed(2)} credited to your account</p>
-            </div>
-            <div className="px-5 py-4 space-y-3">
-              <a href={redeemResult.explorer_url} target="_blank" rel="noopener noreferrer"
-                className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm hover:bg-slate-100 transition-colors">
-                <span className="text-slate-600 font-medium">On-chain proof</span>
-                <span className="text-blue-600 underline font-mono text-xs">{redeemResult.on_chain_sig.slice(0, 16)}... →</span>
-              </a>
-              {selectedVendor && (
-                <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-4 py-3">
-                  <span className="text-sm text-green-800">Total pending payout</span>
-                  <span className="font-bold text-green-700 text-lg">${(selectedVendor.pending_payout_cents / 100).toFixed(2)}</span>
+              {errorMsg && (
+                <div className="mt-3 flex items-center gap-2 bg-red-950/60 border border-red-800/50 rounded-lg px-3 py-2">
+                  <span className="text-red-400 text-sm">⚠</span>
+                  <p className="text-red-300 text-sm">{errorMsg}</p>
                 </div>
               )}
-              <Button onClick={reset} className="w-full bg-slate-900 hover:bg-slate-800 font-semibold">
+            </div>
+          </div>
+        )}
+
+        {/* PREVIEW: confirm redeem */}
+        {appState === "preview" && preview && cat && (
+          <div className="space-y-3">
+            <div className={`relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br ${cat.dark} shadow-2xl ${cat.glow}`}>
+              <div className="absolute inset-0 opacity-5"
+                style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "24px 24px" }} />
+              <div className="relative px-6 pt-8 pb-7">
+                <div className="flex items-start justify-between mb-4">
+                  <span className={`text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full border ${cat.pill}`}>{cat.label}</span>
+                  <span className="text-5xl">{cat.icon}</span>
+                </div>
+                <p className="text-7xl font-black text-white tabular-nums leading-none">
+                  ${(preview.value_cents / 100).toFixed(2)}
+                </p>
+                {preview.unit_count > 1 && <p className="text-white/50 text-sm mt-2">× {preview.unit_count} units</p>}
+                <div className="mt-6 pt-5 border-t border-white/10 flex items-center justify-between">
+                  <p className="text-white/40 text-xs">Expires {new Date(preview.expires_at).toLocaleDateString()}</p>
+                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide">
+                    Valid
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {preview.status !== "issued" ? (
+              <div className="bg-amber-900/30 border border-amber-700/50 rounded-2xl p-5 text-center">
+                <p className="text-amber-400 font-semibold">Cannot redeem — status: {preview.status}</p>
+              </div>
+            ) : (
+              <Button onClick={confirmRedeem} disabled={confirming}
+                className="w-full gradient-green text-white font-black text-xl py-8 border-0 hover:opacity-90 rounded-2xl shadow-xl shadow-emerald-950/50">
+                {confirming ? (
+                  <span className="flex items-center gap-3">
+                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Confirming on Solana...
+                  </span>
+                ) : "✓ Confirm Redeem"}
+              </Button>
+            )}
+            <Button variant="ghost" onClick={reset} className="w-full text-slate-600 hover:text-slate-400 text-sm">Cancel</Button>
+          </div>
+        )}
+
+        {/* ALREADY REDEEMED */}
+        {appState === "double_redeem" && (
+          <div className="rounded-3xl overflow-hidden border-2 border-red-500/60">
+            <div className="bg-red-950 px-8 py-10 text-center space-y-3">
+              <div className="w-16 h-16 rounded-full bg-red-900/60 border border-red-600/40 flex items-center justify-center text-3xl mx-auto">🚫</div>
+              <div className="pt-1">
+                <p className="text-red-400 text-xs font-bold uppercase tracking-widest">On-chain rejection</p>
+                <p className="text-white font-black text-4xl mt-2">Already<br />Redeemed</p>
+              </div>
+              <p className="text-red-300/70 text-sm leading-relaxed pt-1">
+                This voucher was already used.<br />
+                The Solana program rejected the duplicate.
+              </p>
+            </div>
+            <div className="bg-slate-900 px-5 py-4">
+              <Button onClick={reset} className="w-full bg-red-900/60 hover:bg-red-900 text-red-200 border border-red-700/50 font-bold rounded-xl">
                 Scan Another Voucher
               </Button>
             </div>
+          </div>
+        )}
+
+        {/* SUCCESS */}
+        {appState === "success" && redeemResult && (
+          <div className="space-y-3">
+            <div className="rounded-3xl overflow-hidden border border-emerald-700/30">
+              <div className="gradient-green px-6 py-10 text-center relative overflow-hidden">
+                <div className="absolute inset-0 opacity-10"
+                  style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "28px 28px" }} />
+                <div className="relative">
+                  <div className="w-16 h-16 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-3xl mx-auto mb-4">✅</div>
+                  <p className="text-white font-black text-4xl">Redeemed!</p>
+                  <p className="text-5xl font-black text-emerald-200 mt-2 tabular-nums">
+                    ${(redeemResult.value_cents / 100).toFixed(2)}
+                  </p>
+                  <p className="text-emerald-300/70 text-sm mt-1">credited to your account</p>
+                </div>
+              </div>
+              <div className="bg-slate-900 px-5 py-4 space-y-3">
+                <a href={redeemResult.explorer_url} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center justify-between bg-slate-800 hover:bg-slate-700 border border-white/5 rounded-xl px-4 py-3.5 transition-colors group">
+                  <div>
+                    <p className="text-slate-400 text-xs font-bold uppercase tracking-wide">On-chain proof</p>
+                    <p className="text-blue-400 font-mono text-xs mt-0.5">{redeemResult.on_chain_sig.slice(0, 22)}...</p>
+                  </div>
+                  <span className="text-slate-500 group-hover:text-slate-300 transition-colors">→</span>
+                </a>
+                {selectedVendor && (
+                  <div className="flex items-center justify-between bg-emerald-950/60 border border-emerald-700/30 rounded-xl px-4 py-3.5">
+                    <p className="text-emerald-400 text-sm font-medium">New total pending</p>
+                    <p className="text-emerald-300 font-black text-2xl tabular-nums">${(selectedVendor.pending_payout_cents / 100).toFixed(2)}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+            <Button onClick={reset} className="w-full gradient-brand text-white font-bold border-0 hover:opacity-90 rounded-2xl py-5">
+              Scan Another Voucher
+            </Button>
           </div>
         )}
       </div>
