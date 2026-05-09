@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import QRCode from "react-qr-code";
 import { Button } from "@/components/ui/button";
@@ -27,9 +27,6 @@ const CATEGORY_ICONS: Record<string, string> = {
 const TRANSLATIONS: Record<string, Record<string, string>> = {
   en: {
     title: "Aid Voucher",
-    value: "Value",
-    expires: "Expires",
-    status: "Status",
     issued: "Ready to use",
     redeemed: "Already used",
     expired: "Expired",
@@ -37,12 +34,10 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     print: "Print Card",
     chain: "Verified on Solana",
     claim_code: "Code:",
+    expires: "Expires",
   },
   es: {
     title: "Vale de Ayuda",
-    value: "Valor",
-    expires: "Vence",
-    status: "Estado",
     issued: "Listo para usar",
     redeemed: "Ya utilizado",
     expired: "Vencido",
@@ -50,6 +45,7 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     print: "Imprimir Tarjeta",
     chain: "Verificado en Solana",
     claim_code: "Código:",
+    expires: "Vence",
   },
 };
 
@@ -58,7 +54,7 @@ const CATEGORY_LABELS: Record<string, Record<string, string>> = {
   es: { meals: "Comidas", hygiene: "Higiene", transit: "Transporte", laundry: "Lavandería" },
 };
 
-export default function VoucherPage() {
+function VoucherContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const claimToken = searchParams.get("t");
@@ -67,35 +63,36 @@ export default function VoucherPage() {
   const [voucher, setVoucher] = useState<VoucherData | null>(null);
   const [valid, setValid] = useState<boolean | null>(null);
   const [lang, setLang] = useState<"en" | "es">("en");
+  const [origin, setOrigin] = useState("");
   const printRef = useRef<HTMLDivElement>(null);
 
   const t = TRANSLATIONS[lang];
   const catLabel = CATEGORY_LABELS[lang];
 
-  const qrValue = `${window?.location?.origin || ""}/voucher/${voucherId}?t=${claimToken}`;
+  // Safe window access after hydration
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
+
+  const qrValue = `${origin}/voucher/${voucherId}?t=${claimToken}`;
 
   const handlePrint = useReactToPrint({ contentRef: printRef });
 
   useEffect(() => {
-    if (!claimToken) {
-      setValid(false);
-      return;
-    }
+    if (!claimToken) { setValid(false); return; }
 
     fetch(`/api/vouchers/${voucherId}`)
       .then((r) => r.json())
       .then(async (data) => {
         if (data.error) { setValid(false); return; }
 
-        // Verify claim token server-side
         const verifyRes = await fetch(`/api/vouchers/${voucherId}/verify`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ claim_token: claimToken }),
         });
-        const verifyData = await verifyRes.json();
-
-        if (!verifyData.valid) { setValid(false); return; }
+        const { valid: tokenValid } = await verifyRes.json();
+        if (!tokenValid) { setValid(false); return; }
 
         setVoucher(data);
         setValid(true);
@@ -128,18 +125,15 @@ export default function VoucherPage() {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       {/* Language toggle */}
       <div className="fixed top-4 right-4 flex gap-2">
-        <button
-          onClick={() => setLang("en")}
-          className={`text-sm px-3 py-1 rounded-full ${lang === "en" ? "bg-blue-600 text-white" : "bg-white text-gray-600 border"}`}
-        >
-          EN
-        </button>
-        <button
-          onClick={() => setLang("es")}
-          className={`text-sm px-3 py-1 rounded-full ${lang === "es" ? "bg-blue-600 text-white" : "bg-white text-gray-600 border"}`}
-        >
-          ES
-        </button>
+        {(["en", "es"] as const).map((l) => (
+          <button
+            key={l}
+            onClick={() => setLang(l)}
+            className={`text-sm px-3 py-1 rounded-full ${lang === l ? "bg-blue-600 text-white" : "bg-white text-gray-600 border"}`}
+          >
+            {l.toUpperCase()}
+          </button>
+        ))}
       </div>
 
       <div ref={printRef} className="bg-white rounded-2xl shadow-lg p-8 max-w-sm w-full text-center space-y-6">
@@ -154,50 +148,51 @@ export default function VoucherPage() {
         </div>
 
         {isUsable ? (
-          <div className="bg-gray-50 p-4 rounded-xl inline-block">
-            <QRCode value={qrValue} size={200} />
-          </div>
+          <>
+            <div className="bg-gray-50 p-4 rounded-xl inline-block">
+              {origin && <QRCode value={qrValue} size={200} />}
+            </div>
+            <div className="text-xs text-gray-400 font-mono bg-gray-50 rounded p-2 break-all">
+              <span className="text-gray-600">{t.claim_code}</span>{" "}
+              <span className="select-all">{claimToken}</span>
+            </div>
+          </>
         ) : (
           <div className="bg-red-50 rounded-xl p-6">
-            <p className="text-red-600 font-semibold">
+            <p className="text-red-600 font-semibold text-lg">
               {voucher.status === "redeemed" ? t.redeemed : t.expired}
             </p>
           </div>
         )}
 
-        {isUsable && (
-          <div className="text-xs text-gray-400 font-mono bg-gray-50 rounded p-2">
-            <span className="text-gray-600">{t.claim_code}</span>{" "}
-            <span className="select-all">{claimToken}</span>
-          </div>
-        )}
-
         <p className="text-xs text-gray-500">{t.scan_note}</p>
 
-        <div className="text-xs text-gray-400">
-          <p>
-            {t.expires}: {new Date(voucher.expires_at).toLocaleDateString()}
-          </p>
+        <div className="text-xs text-gray-400 space-y-1">
+          <p>{t.expires}: {new Date(voucher.expires_at).toLocaleDateString()}</p>
           {voucher.explorer_url && (
-            <a
-              href={voucher.explorer_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-500 underline"
-            >
+            <a href={voucher.explorer_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 underline block">
               {t.chain}
             </a>
           )}
         </div>
 
-        <Button
-          variant="outline"
-          className="w-full print:hidden"
-          onClick={() => handlePrint()}
-        >
+        <Button variant="outline" className="w-full print:hidden" onClick={() => handlePrint()}>
           {t.print}
         </Button>
       </div>
     </div>
+  );
+}
+
+// useSearchParams requires a Suspense boundary in Next.js 14
+export default function VoucherPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-500">Loading...</p>
+      </div>
+    }>
+      <VoucherContent />
+    </Suspense>
   );
 }

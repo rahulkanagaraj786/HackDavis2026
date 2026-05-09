@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { DEMO_ORGS, type DemoOrg } from "@/lib/demo-session";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -105,8 +106,15 @@ export default function AdminPage() {
       if (!res.ok) throw new Error(data.error);
       setLastIssued(data);
       loadVouchers(currentOrg.id);
+      toast.success("Voucher issued!", {
+        description: (
+          <a href={data.explorer_url} target="_blank" rel="noopener noreferrer" className="underline text-blue-600">
+            View on Solana Explorer →
+          </a>
+        ),
+      });
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : String(err));
+      toast.error(err instanceof Error ? err.message : "Issue failed");
     } finally {
       setIssuing(false);
     }

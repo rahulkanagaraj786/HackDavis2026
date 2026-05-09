@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -147,13 +148,25 @@ export default function VendorPage() {
       if (!res.ok) {
         if (data.code === "ALREADY_REDEEMED") {
           setError("Already redeemed — on-chain proof prevents double use.");
+          toast.error("Already Redeemed", {
+            description: "This voucher was already used. The blockchain prevented double-spending.",
+            duration: 6000,
+          });
         } else {
           setError(data.error || "Redemption failed");
+          toast.error(data.error || "Redemption failed");
         }
         return;
       }
       setRedeemResult(data);
       setPreview(null);
+      toast.success("Redeemed!", {
+        description: (
+          <a href={data.explorer_url} target="_blank" rel="noopener noreferrer" className="underline">
+            View on-chain proof →
+          </a>
+        ),
+      });
 
       // Refresh vendor payout
       fetch("/api/orgs/vendors").then((r) => r.json()).then((d) => {
