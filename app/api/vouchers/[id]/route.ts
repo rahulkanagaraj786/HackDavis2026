@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
-import { explorerUrl } from "@/lib/mock-chain";
+import { explorerUrl } from "@/lib/solana";
 
 export async function GET(
   _req: NextRequest,
