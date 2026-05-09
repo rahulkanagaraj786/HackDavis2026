@@ -3,38 +3,19 @@
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Vendor = { id: string; name: string; category: string; pending_payout_cents: number };
-type VoucherPreview = {
-  id: string;
-  category: string;
-  value_cents: number;
-  unit_count: number;
-  status: string;
-  expires_at: string;
-};
+type VoucherPreview = { id: string; category: string; value_cents: number; unit_count: number; status: string; expires_at: string };
+type RedeemResult = { success: boolean; on_chain_sig: string; explorer_url: string; value_cents: number };
 
-type RedeemResult = {
-  success: boolean;
-  on_chain_sig: string;
-  explorer_url: string;
-  value_cents: number;
-};
-
-const CATEGORY_ICONS: Record<string, string> = {
-  meals: "🍽️",
-  hygiene: "🧴",
-  transit: "🚌",
-  laundry: "👕",
-};
+const CATEGORY_ICONS: Record<string, string> = { meals: "🍽️", hygiene: "🧴", transit: "🚌", laundry: "👕" };
+const CATEGORY_LABELS: Record<string, string> = { meals: "Meals", hygiene: "Hygiene", transit: "Transit", laundry: "Laundry" };
 
 export default function VendorPage() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [selectedVendorId, setSelectedVendorId] = useState<string>("");
+  const [selectedVendorId, setSelectedVendorId] = useState("");
   const [manualCode, setManualCode] = useState("");
   const [preview, setPreview] = useState<VoucherPreview | null>(null);
   const [voucherId, setVoucherId] = useState<string | null>(null);
@@ -45,17 +26,15 @@ export default function VendorPage() {
   const [confirming, setConfirming] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const scannerRef = useRef<any>(null);
-  const scannerDivRef = useRef<HTMLDivElement>(null);
 
   const selectedVendor = vendors.find((v) => v.id === selectedVendorId);
 
   useEffect(() => {
-    fetch("/api/orgs/vendors")
-      .then((r) => r.json())
-      .then((d) => {
-        setVendors(d.vendors || []);
-        if (d.vendors?.length > 0) setSelectedVendorId(d.vendors[0].id);
-      });
+    fetch("/api/orgs/vendors").then(r => r.json()).then(d => {
+      const list = d.vendors || [];
+      setVendors(list);
+      if (list.length > 0) setSelectedVendorId(list[0].id);
+    });
   }, []);
 
   function parseQrUrl(raw: string): { voucherId: string; token: string } | null {
@@ -66,7 +45,6 @@ export default function VendorPage() {
       const token = url.searchParams.get("t");
       if (id && token) return { voucherId: id, token };
     } catch {
-      // not a URL — maybe raw claim code format "voucherid:token"
       const split = raw.split(":");
       if (split.length === 2) return { voucherId: split[0], token: split[1] };
     }
@@ -76,57 +54,32 @@ export default function VendorPage() {
   async function handleQrData(raw: string) {
     setError(null);
     const parsed = parseQrUrl(raw.trim());
-    if (!parsed) {
-      setError("Could not parse QR code. Try manual entry.");
-      return;
-    }
-    await fetchPreview(parsed.voucherId, parsed.token);
-  }
-
-  async function fetchPreview(vid: string, token: string) {
-    const res = await fetch(`/api/vouchers/${vid}`);
+    if (!parsed) { setError("Could not parse QR code. Try manual entry."); return; }
+    const res = await fetch(`/api/vouchers/${parsed.voucherId}`);
     const data = await res.json();
     if (data.error) { setError(data.error); return; }
-    setVoucherId(vid);
-    setClaimToken(token);
+    setVoucherId(parsed.voucherId);
+    setClaimToken(parsed.token);
     setPreview(data);
     setRedeemResult(null);
   }
 
-  async function handleManualEntry() {
-    const raw = manualCode.trim();
-    if (!raw) return;
-    await handleQrData(raw);
-  }
-
   async function startScanner() {
-    if (!scannerDivRef.current) return;
+    if (!document.getElementById("qr-scanner-div")) return;
     setScanning(true);
     const { Html5Qrcode } = await import("html5-qrcode");
     const scanner = new Html5Qrcode("qr-scanner-div");
     scannerRef.current = scanner;
     try {
-      await scanner.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: 250 },
-        (decodedText: string) => {
-          scanner.stop();
-          setScanning(false);
-          handleQrData(decodedText);
-        },
+      await scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 },
+        (decodedText: string) => { scanner.stop(); setScanning(false); handleQrData(decodedText); },
         undefined
       );
-    } catch {
-      setScanning(false);
-      setError("Camera access denied. Use manual entry.");
-    }
+    } catch { setScanning(false); setError("Camera access denied. Use manual entry."); }
   }
 
   async function stopScanner() {
-    if (scannerRef.current) {
-      await scannerRef.current.stop().catch(() => {});
-      scannerRef.current = null;
-    }
+    if (scannerRef.current) { await scannerRef.current.stop().catch(() => {}); scannerRef.current = null; }
     setScanning(false);
   }
 
@@ -136,179 +89,185 @@ export default function VendorPage() {
     setError(null);
     try {
       const res = await fetch("/api/redeem", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          voucher_id: voucherId,
-          claim_token: claimToken,
-          vendor_id: selectedVendorId,
-        }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voucher_id: voucherId, claim_token: claimToken, vendor_id: selectedVendorId }),
       });
       const data = await res.json();
       if (!res.ok) {
         if (data.code === "ALREADY_REDEEMED") {
-          setError("Already redeemed — on-chain proof prevents double use.");
-          toast.error("Already Redeemed", {
-            description: "This voucher was already used. The blockchain prevented double-spending.",
-            duration: 6000,
-          });
+          setError("ALREADY_REDEEMED");
+          toast.error("Already Redeemed", { description: "The blockchain prevented double-spending.", duration: 6000 });
         } else {
           setError(data.error || "Redemption failed");
-          toast.error(data.error || "Redemption failed");
         }
         return;
       }
       setRedeemResult(data);
       setPreview(null);
-      toast.success("Redeemed!", {
-        description: (
-          <a href={data.explorer_url} target="_blank" rel="noopener noreferrer" className="underline">
-            View on-chain proof →
-          </a>
-        ),
-      });
+      toast.success("Redeemed!", { description: <a href={data.explorer_url} target="_blank" rel="noopener noreferrer" className="underline">View on-chain proof →</a> });
+      fetch("/api/orgs/vendors").then(r => r.json()).then(d => setVendors(d.vendors || []));
+    } finally { setConfirming(false); }
+  }
 
-      // Refresh vendor payout
-      fetch("/api/orgs/vendors").then((r) => r.json()).then((d) => {
-        setVendors(d.vendors || []);
-      });
-    } finally {
-      setConfirming(false);
-    }
+  function reset() {
+    setRedeemResult(null); setPreview(null); setVoucherId(null);
+    setClaimToken(null); setManualCode(""); setError(null);
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 max-w-lg mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 mt-6">Vendor Redemption</h1>
-        <p className="text-sm text-gray-500">Scan or enter a voucher code</p>
-      </div>
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <header className="bg-white border-b border-slate-200 px-6 py-4">
+        <div className="max-w-lg mx-auto flex items-center justify-between">
+          <div>
+            <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Vendor Portal</p>
+            <p className="font-semibold text-slate-900">Relief Ledger</p>
+          </div>
+          {selectedVendor && (
+            <div className="text-right">
+              <p className="text-xs text-slate-500">{selectedVendor.name}</p>
+              <p className="text-sm font-bold text-green-700">${(selectedVendor.pending_payout_cents / 100).toFixed(2)} pending</p>
+            </div>
+          )}
+        </div>
+      </header>
 
-      {/* Vendor selector */}
-      <Card>
-        <CardContent className="pt-4">
-          <Label>Vendor</Label>
+      <div className="max-w-lg mx-auto px-4 py-6 space-y-4">
+
+        {/* Vendor selector */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <p className="text-sm font-semibold text-slate-700 mb-2">Vendor</p>
           <Select value={selectedVendorId} onValueChange={(v) => v && setSelectedVendorId(v)}>
-            <SelectTrigger className="mt-1">
-              <SelectValue placeholder="Select vendor..." />
-            </SelectTrigger>
+            <SelectTrigger><SelectValue placeholder="Select vendor..." /></SelectTrigger>
             <SelectContent>
               {vendors.map((v) => (
                 <SelectItem key={v.id} value={v.id}>
-                  {v.name}
+                  <span className="flex items-center gap-2">{CATEGORY_ICONS[v.category]} {v.name}</span>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
           {selectedVendor && (
-            <p className="text-sm text-green-700 font-semibold mt-2">
-              Pending payout: ${(selectedVendor.pending_payout_cents / 100).toFixed(2)}
-              <span className="text-xs text-gray-400 font-normal ml-2">auto-reimbursed from on-chain proof</span>
-            </p>
+            <div className="mt-3 flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-4 py-2.5">
+              <span className="text-sm text-green-800">Pending reimbursement</span>
+              <span className="text-lg font-bold text-green-700">${(selectedVendor.pending_payout_cents / 100).toFixed(2)}</span>
+            </div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* QR scanner */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Scan QR Code</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div id="qr-scanner-div" ref={scannerDivRef} className="w-full min-h-16" />
-          {!scanning ? (
-            <Button onClick={startScanner} className="w-full">
-              Start Camera
-            </Button>
-          ) : (
-            <Button variant="outline" onClick={stopScanner} className="w-full">
-              Stop Camera
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Manual entry fallback */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Manual Entry</CardTitle>
-        </CardHeader>
-        <CardContent className="flex gap-2">
-          <Input
-            placeholder="Paste voucher URL or code..."
-            value={manualCode}
-            onChange={(e) => setManualCode(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleManualEntry()}
-          />
-          <Button onClick={handleManualEntry}>Go</Button>
-        </CardContent>
-      </Card>
-
-      {/* Error */}
-      {error && (
-        <div className="bg-red-50 border border-red-300 rounded-lg p-4">
-          <p className="text-red-700 font-semibold text-sm">{error}</p>
         </div>
-      )}
 
-      {/* Voucher preview + confirm */}
-      {preview && !redeemResult && (
-        <Card className="border-2 border-blue-200">
-          <CardContent className="pt-4 space-y-4">
-            <div className="flex items-center gap-3">
-              <span className="text-4xl">{CATEGORY_ICONS[preview.category] || "🎟️"}</span>
-              <div>
-                <p className="font-semibold capitalize">{preview.category}</p>
-                <p className="text-2xl font-bold text-blue-600">
-                  ${(preview.value_cents / 100).toFixed(2)}
-                  {preview.unit_count > 1 && <span className="text-base text-gray-400"> × {preview.unit_count}</span>}
-                </p>
+        {/* Scanner */}
+        {!preview && !redeemResult && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-5 pt-5 pb-3">
+              <p className="font-semibold text-slate-900">Scan QR Code</p>
+              <p className="text-sm text-slate-500 mt-0.5">Point camera at printed voucher card</p>
+            </div>
+            <div id="qr-scanner-div" className="w-full" />
+            <div className="px-5 pb-5 pt-3 space-y-3">
+              {!scanning ? (
+                <Button onClick={startScanner} className="w-full bg-slate-900 hover:bg-slate-800 font-semibold">
+                  Start Camera
+                </Button>
+              ) : (
+                <Button variant="outline" onClick={stopScanner} className="w-full">Stop Camera</Button>
+              )}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200" /></div>
+                <div className="relative text-center"><span className="bg-white px-3 text-xs text-slate-400">or enter manually</span></div>
+              </div>
+              <div className="flex gap-2">
+                <Input placeholder="Paste voucher URL or code..." value={manualCode}
+                  onChange={(e) => setManualCode(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleQrData(manualCode)} />
+                <Button variant="outline" onClick={() => handleQrData(manualCode)}>Go</Button>
               </div>
             </div>
-            <p className="text-xs text-gray-500">
-              Expires: {new Date(preview.expires_at).toLocaleDateString()}
-            </p>
+          </div>
+        )}
 
-            {preview.status !== "issued" ? (
-              <div className="bg-red-100 rounded p-3 text-red-700 text-sm font-medium">
-                Cannot redeem — status: {preview.status}
-              </div>
-            ) : (
-              <Button onClick={confirmRedeem} disabled={confirming} className="w-full bg-green-600 hover:bg-green-700">
-                {confirming ? "Processing..." : "Confirm Redeem"}
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Success state */}
-      {redeemResult && (
-        <Card className="border-2 border-green-300 bg-green-50">
-          <CardContent className="pt-4 space-y-3 text-center">
-            <div className="text-4xl">✅</div>
-            <p className="font-bold text-green-800 text-lg">Redeemed!</p>
-            <p className="text-green-700">
-              ${(redeemResult.value_cents / 100).toFixed(2)} credited
-            </p>
-            <a
-              href={redeemResult.explorer_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-blue-600 underline block"
-            >
-              View on-chain proof
-            </a>
-            <Button
-              variant="outline"
-              className="w-full mt-2"
-              onClick={() => { setRedeemResult(null); setVoucherId(null); setClaimToken(null); setManualCode(""); }}
-            >
+        {/* Already redeemed error — big red for projector */}
+        {error === "ALREADY_REDEEMED" && (
+          <div className="bg-red-600 rounded-2xl p-6 text-center shadow-lg">
+            <div className="text-4xl mb-3">🚫</div>
+            <p className="text-white font-bold text-xl">Already Redeemed</p>
+            <p className="text-red-100 text-sm mt-2">This voucher was already used.<br />The blockchain prevented double-spending.</p>
+            <Button onClick={reset} variant="outline" className="mt-4 bg-transparent text-white border-white hover:bg-red-700 hover:text-white">
               Scan Another
             </Button>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
+
+        {/* Generic error */}
+        {error && error !== "ALREADY_REDEEMED" && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+            <span className="text-red-500 text-lg">⚠️</span>
+            <div>
+              <p className="text-red-800 font-semibold text-sm">Error</p>
+              <p className="text-red-700 text-sm mt-0.5">{error}</p>
+            </div>
+            <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600 text-sm">✕</button>
+          </div>
+        )}
+
+        {/* Voucher preview */}
+        {preview && !redeemResult && error !== "ALREADY_REDEEMED" && (
+          <div className="bg-white rounded-2xl border-2 border-blue-300 shadow-md overflow-hidden">
+            <div className="bg-blue-50 px-5 py-4 flex items-center gap-4">
+              <div className="text-5xl">{CATEGORY_ICONS[preview.category] || "🎟️"}</div>
+              <div>
+                <p className="text-sm font-medium text-blue-700 uppercase tracking-wide">{CATEGORY_LABELS[preview.category]}</p>
+                <p className="text-4xl font-bold text-slate-900">${(preview.value_cents / 100).toFixed(2)}</p>
+                {preview.unit_count > 1 && <p className="text-sm text-slate-500">× {preview.unit_count} units</p>}
+              </div>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div className="flex justify-between text-sm text-slate-500">
+                <span>Expires</span>
+                <span>{new Date(preview.expires_at).toLocaleDateString()}</span>
+              </div>
+
+              {preview.status !== "issued" ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-center">
+                  <p className="text-amber-800 font-semibold">Cannot redeem — status: {preview.status}</p>
+                </div>
+              ) : (
+                <Button onClick={confirmRedeem} disabled={confirming}
+                  className="w-full bg-green-600 hover:bg-green-700 font-bold text-lg py-6">
+                  {confirming ? "Processing..." : "✓ Confirm Redeem"}
+                </Button>
+              )}
+              <Button variant="ghost" onClick={reset} className="w-full text-slate-400 text-sm">Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Success state */}
+        {redeemResult && (
+          <div className="bg-white rounded-2xl border-2 border-green-300 shadow-md overflow-hidden">
+            <div className="bg-green-600 px-5 py-6 text-center">
+              <div className="text-5xl mb-2">✅</div>
+              <p className="text-white font-bold text-2xl">Redeemed!</p>
+              <p className="text-green-100 text-sm mt-1">${(redeemResult.value_cents / 100).toFixed(2)} credited to your account</p>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <a href={redeemResult.explorer_url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm hover:bg-slate-100 transition-colors">
+                <span className="text-slate-600 font-medium">On-chain proof</span>
+                <span className="text-blue-600 underline font-mono text-xs">{redeemResult.on_chain_sig.slice(0, 16)}... →</span>
+              </a>
+              {selectedVendor && (
+                <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+                  <span className="text-sm text-green-800">Total pending payout</span>
+                  <span className="font-bold text-green-700 text-lg">${(selectedVendor.pending_payout_cents / 100).toFixed(2)}</span>
+                </div>
+              )}
+              <Button onClick={reset} className="w-full bg-slate-900 hover:bg-slate-800 font-semibold">
+                Scan Another Voucher
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

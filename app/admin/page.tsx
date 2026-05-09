@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { DEMO_ORGS, type DemoOrg } from "@/lib/demo-session";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,10 +16,10 @@ type Voucher = {
   unit_count: number;
   status: string;
   alias: string | null;
+  claim_token: string;
   on_chain_issue_sig: string | null;
   created_at: string;
   expires_at: string;
-  claim_token?: string;
 };
 
 type IssueResult = {
@@ -31,18 +30,13 @@ type IssueResult = {
   explorer_url: string;
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  meals: "Meals",
-  hygiene: "Hygiene",
-  transit: "Transit",
-  laundry: "Laundry",
-};
+const CATEGORY_ICONS: Record<string, string> = { meals: "🍽️", hygiene: "🧴", transit: "🚌", laundry: "👕" };
+const CATEGORY_LABELS: Record<string, string> = { meals: "Meals", hygiene: "Hygiene", transit: "Transit", laundry: "Laundry" };
 
-const CATEGORY_ICONS: Record<string, string> = {
-  meals: "🍽️",
-  hygiene: "🧴",
-  transit: "🚌",
-  laundry: "👕",
+const STATUS_STYLES: Record<string, string> = {
+  issued: "bg-blue-50 text-blue-700 border border-blue-200",
+  redeemed: "bg-green-50 text-green-700 border border-green-200",
+  expired: "bg-gray-100 text-gray-500 border border-gray-200",
 };
 
 export default function AdminPage() {
@@ -51,26 +45,13 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(false);
   const [issuing, setIssuing] = useState(false);
   const [printVoucher, setPrintVoucher] = useState<(Voucher & { qr_url: string }) | null>(null);
-
-  // Issue form state
-  const [form, setForm] = useState({
-    category: "meals",
-    value_cents: 500,
-    unit_count: 1,
-    alias: "",
-    expires_days: 7,
-  });
-
+  const [form, setForm] = useState({ category: "meals", value_cents: 500, unit_count: 1, alias: "", expires_days: 7 });
   const [lastIssued, setLastIssued] = useState<IssueResult | null>(null);
 
   async function switchOrg(cookieValue: string) {
     const org = DEMO_ORGS.find((o) => o.cookieValue === cookieValue)!;
     setCurrentOrg(org);
-    await fetch("/api/orgs/switch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ org_cookie: cookieValue }),
-    });
+    await fetch("/api/orgs/switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ org_cookie: cookieValue }) });
     loadVouchers(org.id);
   }
 
@@ -86,32 +67,18 @@ export default function AdminPage() {
     setIssuing(true);
     setLastIssued(null);
     try {
-      const expires_at = new Date(
-        Date.now() + form.expires_days * 24 * 60 * 60 * 1000
-      ).toISOString();
-
+      const expires_at = new Date(Date.now() + form.expires_days * 86400000).toISOString();
       const res = await fetch("/api/vouchers/issue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          category: form.category,
-          value_cents: form.value_cents,
-          unit_count: form.unit_count,
-          alias: form.alias || undefined,
-          expires_at,
-          org_id: currentOrg.id,
-        }),
+        body: JSON.stringify({ ...form, alias: form.alias || undefined, expires_at, org_id: currentOrg.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setLastIssued(data);
       loadVouchers(currentOrg.id);
-      toast.success("Voucher issued!", {
-        description: (
-          <a href={data.explorer_url} target="_blank" rel="noopener noreferrer" className="underline text-blue-600">
-            View on Solana Explorer →
-          </a>
-        ),
+      toast.success("Voucher issued on Solana!", {
+        description: <a href={data.explorer_url} target="_blank" rel="noopener noreferrer" className="underline text-blue-600">View on Explorer →</a>,
       });
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Issue failed");
@@ -120,196 +87,185 @@ export default function AdminPage() {
     }
   }
 
-  useEffect(() => {
-    loadVouchers(currentOrg.id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentOrg.id]);
+  useEffect(() => { loadVouchers(currentOrg.id); }, [currentOrg.id]);
 
-  const statusColor: Record<string, string> = {
-    issued: "bg-blue-100 text-blue-800",
-    redeemed: "bg-green-100 text-green-800",
-    expired: "bg-gray-100 text-gray-600",
-  };
+  const issuedCount = vouchers.filter(v => v.status === "issued").length;
+  const redeemedCount = vouchers.filter(v => v.status === "redeemed").length;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-slate-50">
       {/* Header */}
-      <header className="bg-white border-b px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div
-            className={`w-8 h-8 rounded-full ${
-              currentOrg.color === "green" ? "bg-green-500" : "bg-orange-500"
-            }`}
-          />
-          <span className="font-semibold text-gray-900">Relief Ledger — Admin</span>
-        </div>
+      <header className="bg-white border-b border-slate-200 px-6 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-white font-bold text-sm ${currentOrg.color === "green" ? "bg-green-600" : "bg-orange-500"}`}>
+              {currentOrg.name.charAt(0)}
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Admin Dashboard</p>
+              <p className="font-semibold text-slate-900 leading-tight">Relief Ledger</p>
+            </div>
+          </div>
 
-        {/* Org switcher */}
-        <Select value={currentOrg.cookieValue} onValueChange={(v) => v && switchOrg(v)}>
-          <SelectTrigger className="w-52">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {DEMO_ORGS.map((org) => (
-              <SelectItem key={org.cookieValue} value={org.cookieValue}>
-                <div className="flex items-center gap-2">
-                  <div
-                    className={`w-3 h-3 rounded-full ${
-                      org.color === "green" ? "bg-green-500" : "bg-orange-500"
-                    }`}
-                  />
-                  {org.name}
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          <Select value={currentOrg.cookieValue} onValueChange={(v) => v && switchOrg(v)}>
+            <SelectTrigger className="w-52 bg-white">
+              <div className="flex items-center gap-2">
+                <div className={`w-2.5 h-2.5 rounded-full ${currentOrg.color === "green" ? "bg-green-500" : "bg-orange-500"}`} />
+                <SelectValue />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              {DEMO_ORGS.map((org) => (
+                <SelectItem key={org.cookieValue} value={org.cookieValue}>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2.5 h-2.5 rounded-full ${org.color === "green" ? "bg-green-500" : "bg-orange-500"}`} />
+                    {org.name}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </header>
 
-      <div className="max-w-5xl mx-auto px-6 py-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="max-w-6xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+
         {/* Issue form */}
-        <Card className="md:col-span-1">
-          <CardHeader>
-            <CardTitle className="text-base">Issue Voucher</CardTitle>
-            <p className="text-xs text-gray-500">Issuing as {currentOrg.name}</p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label>Category</Label>
-              <Select value={form.category} onValueChange={(v) => v && setForm({ ...form, category: v })}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>
-                      {CATEGORY_ICONS[k]} {v}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <div className="lg:col-span-1">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className={`px-6 py-5 ${currentOrg.color === "green" ? "bg-green-600" : "bg-orange-500"}`}>
+              <p className="text-white font-semibold text-lg">Issue Voucher</p>
+              <p className="text-white/70 text-sm mt-0.5">Issuing as {currentOrg.name}</p>
             </div>
 
-            <div>
-              <Label>Value (cents)</Label>
-              <Input
-                type="number"
-                className="mt-1"
-                value={form.value_cents}
-                onChange={(e) => setForm({ ...form, value_cents: parseInt(e.target.value) || 0 })}
-              />
-            </div>
-
-            <div>
-              <Label>Unit count</Label>
-              <Input
-                type="number"
-                className="mt-1"
-                value={form.unit_count}
-                onChange={(e) => setForm({ ...form, unit_count: parseInt(e.target.value) || 1 })}
-              />
-            </div>
-
-            <div>
-              <Label>Expires in (days)</Label>
-              <Input
-                type="number"
-                className="mt-1"
-                value={form.expires_days}
-                onChange={(e) => setForm({ ...form, expires_days: parseInt(e.target.value) || 7 })}
-              />
-            </div>
-
-            <div>
-              <Label>Alias (optional)</Label>
-              <Input
-                className="mt-1"
-                placeholder="e.g. River, Neighbor"
-                value={form.alias}
-                onChange={(e) => setForm({ ...form, alias: e.target.value })}
-              />
-            </div>
-
-            <Button onClick={issueVoucher} disabled={issuing} className="w-full">
-              {issuing ? "Issuing..." : "Issue Voucher"}
-            </Button>
-
-            {lastIssued && (
-              <div className="bg-green-50 border border-green-200 rounded p-3 space-y-1">
-                <p className="text-xs font-semibold text-green-800">Voucher issued!</p>
-                <a
-                  href={lastIssued.explorer_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-600 underline break-all"
-                >
-                  View on Solana Explorer
-                </a>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <Label className="text-slate-700 font-medium">Category</Label>
+                <Select value={form.category} onValueChange={(v) => v && setForm({ ...form, category: v })}>
+                  <SelectTrigger className="mt-1.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>
+                        <span className="flex items-center gap-2">{CATEGORY_ICONS[k]} {v}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            )}
-          </CardContent>
-        </Card>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-slate-700 font-medium">Value (¢)</Label>
+                  <Input type="number" className="mt-1.5" value={form.value_cents}
+                    onChange={(e) => setForm({ ...form, value_cents: parseInt(e.target.value) || 0 })} />
+                </div>
+                <div>
+                  <Label className="text-slate-700 font-medium">Units</Label>
+                  <Input type="number" className="mt-1.5" value={form.unit_count}
+                    onChange={(e) => setForm({ ...form, unit_count: parseInt(e.target.value) || 1 })} />
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-slate-700 font-medium">Expires in (days)</Label>
+                <Input type="number" className="mt-1.5" value={form.expires_days}
+                  onChange={(e) => setForm({ ...form, expires_days: parseInt(e.target.value) || 7 })} />
+              </div>
+
+              <div>
+                <Label className="text-slate-700 font-medium">Alias <span className="text-slate-400 font-normal">(optional)</span></Label>
+                <Input className="mt-1.5" placeholder="e.g. River, Neighbor" value={form.alias}
+                  onChange={(e) => setForm({ ...form, alias: e.target.value })} />
+              </div>
+
+              <Button onClick={issueVoucher} disabled={issuing} className={`w-full mt-2 font-semibold ${currentOrg.color === "green" ? "bg-green-600 hover:bg-green-700" : "bg-orange-500 hover:bg-orange-600"}`}>
+                {issuing ? "Issuing on Solana..." : "Issue Voucher"}
+              </Button>
+
+              {lastIssued && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    <p className="text-sm font-semibold text-green-800">Confirmed on Solana</p>
+                  </div>
+                  <a href={lastIssued.explorer_url} target="_blank" rel="noopener noreferrer"
+                    className="text-xs text-blue-600 underline break-all block">
+                    {lastIssued.on_chain_sig.slice(0, 20)}... → Explorer
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
 
         {/* Voucher list */}
-        <div className="md:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-5">
+          {/* Stats row */}
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { label: "Total", value: vouchers.length, color: "text-slate-900" },
+              { label: "Issued", value: issuedCount, color: "text-blue-600" },
+              { label: "Redeemed", value: redeemedCount, color: "text-green-600" },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="bg-white rounded-xl border border-slate-200 p-4 text-center shadow-sm">
+                <p className={`text-3xl font-bold ${color}`}>{value}</p>
+                <p className="text-xs text-slate-500 mt-1 uppercase tracking-wide">{label}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* List header */}
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900">
-              {currentOrg.name} — Vouchers
-            </h2>
-            <Button variant="outline" size="sm" onClick={() => loadVouchers(currentOrg.id)}>
+            <h2 className="font-semibold text-slate-900">{currentOrg.name} — Vouchers</h2>
+            <Button variant="outline" size="sm" onClick={() => loadVouchers(currentOrg.id)} className="text-slate-600">
               Refresh
             </Button>
           </div>
 
           {loading ? (
-            <p className="text-sm text-gray-500">Loading...</p>
+            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
+              <p className="text-slate-400">Loading vouchers...</p>
+            </div>
           ) : vouchers.length === 0 ? (
-            <p className="text-sm text-gray-500">No vouchers yet. Issue one!</p>
+            <div className="bg-white rounded-2xl border border-slate-200 border-dashed p-12 text-center">
+              <p className="text-4xl mb-3">🎟️</p>
+              <p className="text-slate-500">No vouchers yet — issue one above.</p>
+            </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {vouchers.map((v) => (
-                <Card key={v.id} className="py-3">
-                  <CardContent className="flex items-center justify-between px-4">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl">{CATEGORY_ICONS[v.category] || "?"}</span>
-                      <div>
-                        <p className="text-sm font-medium">
-                          {CATEGORY_LABELS[v.category]} — ${(v.value_cents / 100).toFixed(2)}
-                          {v.unit_count > 1 && ` × ${v.unit_count}`}
-                        </p>
-                        {v.alias && (
-                          <p className="text-xs text-gray-500">{v.alias}</p>
-                        )}
-                        <p className="text-xs text-gray-400">
-                          {new Date(v.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
+                <div key={v.id} className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="text-3xl">{CATEGORY_ICONS[v.category] || "🎟️"}</div>
+                    <div>
+                      <p className="font-semibold text-slate-900">
+                        {CATEGORY_LABELS[v.category]}
+                        <span className="ml-2 text-slate-500 font-normal">${(v.value_cents / 100).toFixed(2)}{v.unit_count > 1 && ` × ${v.unit_count}`}</span>
+                      </p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {v.alias && <span className="text-slate-600 mr-2">{v.alias}</span>}
+                        {new Date(v.created_at).toLocaleDateString()}
+                      </p>
                     </div>
+                  </div>
 
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[v.status]}`}
-                      >
-                        {v.status}
-                      </span>
-                      {v.status === "issued" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            const baseUrl = window.location.origin;
-                            setPrintVoucher({
-                              ...v,
-                              qr_url: `${baseUrl}/voucher/${v.id}?t=${v.claim_token || ""}`,
-                            });
-                          }}
-                        >
-                          Print Card
-                        </Button>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_STYLES[v.status]}`}>
+                      {v.status}
+                    </span>
+                    {v.status === "issued" && (
+                      <Button variant="outline" size="sm" className="text-slate-700 border-slate-300"
+                        onClick={() => {
+                          const baseUrl = window.location.origin;
+                          setPrintVoucher({ ...v, qr_url: `${baseUrl}/voucher/${v.id}?t=${v.claim_token}` });
+                        }}>
+                        Print Card
+                      </Button>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
           )}
@@ -317,11 +273,7 @@ export default function AdminPage() {
       </div>
 
       {printVoucher && (
-        <VoucherPrintModal
-          voucher={printVoucher}
-          orgName={currentOrg.name}
-          onClose={() => setPrintVoucher(null)}
-        />
+        <VoucherPrintModal voucher={printVoucher} orgName={currentOrg.name} onClose={() => setPrintVoucher(null)} />
       )}
     </div>
   );
