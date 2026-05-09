@@ -9,6 +9,34 @@ import { getConnection, getBackendKeypair } from "./solana";
 import { isMockChain, mockIssueVoucher, mockRedeemVoucher, explorerUrl } from "./mock-chain";
 import { createHash } from "crypto";
 
+// Polling-based confirmation — avoids WebSocket subscription hangs on devnet/localnet.
+async function sendWithPollingConfirm(
+  connection: web3.Connection,
+  tx: web3.Transaction,
+  keypair: web3.Keypair
+): Promise<string> {
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  tx.recentBlockhash = blockhash;
+  tx.lastValidBlockHeight = lastValidBlockHeight;
+  tx.feePayer = keypair.publicKey;
+  tx.sign(keypair);
+
+  const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false });
+
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const { value } = await connection.getSignatureStatus(sig, { searchTransactionHistory: false });
+    if (value) {
+      if (value.err) throw new Error(`Transaction failed: ${JSON.stringify(value.err)}`);
+      if (value.confirmationStatus === "confirmed" || value.confirmationStatus === "finalized") {
+        return sig;
+      }
+    }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  throw new Error("Transaction confirmation timed out after 30s");
+}
+
 let IDL: any = null;
 
 async function getIDL() {
@@ -71,7 +99,7 @@ export async function issueVoucherOnChain(params: {
     program.programId
   );
 
-  const sig = await (program.methods as any)
+  const tx = await (program.methods as any)
     .issueVoucher(
       Array.from(voucherIdHash),
       Array.from(orgIdHash),
@@ -84,9 +112,9 @@ export async function issueVoucherOnChain(params: {
       authority: keypair.publicKey,
       systemProgram: web3.SystemProgram.programId,
     })
-    .signers([keypair])
-    .rpc();
+    .transaction();
 
+  const sig = await sendWithPollingConfirm(connection, tx, keypair);
   return { signature: sig, explorerUrl: explorerUrl(sig) };
 }
 
@@ -117,7 +145,7 @@ export async function redeemVoucherOnChain(params: {
     program.programId
   );
 
-  const sig = await (program.methods as any)
+  const tx = await (program.methods as any)
     .redeemVoucher(
       Array.from(voucherIdHash),
       Array.from(vendorHash)
@@ -126,8 +154,8 @@ export async function redeemVoucherOnChain(params: {
       voucherAccount: voucherPDA,
       authority: keypair.publicKey,
     })
-    .signers([keypair])
-    .rpc();
+    .transaction();
 
+  const sig = await sendWithPollingConfirm(connection, tx, keypair);
   return { signature: sig, explorerUrl: explorerUrl(sig) };
 }
