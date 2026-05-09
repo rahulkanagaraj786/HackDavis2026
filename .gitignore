@@ -25,6 +25,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# anchor / solana build artifacts
+.anchor/
+/target/
+/programs/*/target/
+/programs/*/Cargo.lock
+/test-ledger/
+
 # local env files
 .env*.local
 
