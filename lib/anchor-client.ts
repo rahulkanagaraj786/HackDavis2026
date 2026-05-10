@@ -24,6 +24,7 @@ const ISSUE_VOUCHER_DISCRIMINATOR = instructionDiscriminator("issue_voucher");
 const REDEEM_VOUCHER_DISCRIMINATOR = instructionDiscriminator("redeem_voucher");
 const ALREADY_REDEEMED_CODE = "0x1770";
 const INVALID_CATEGORY_CODE = "0x1771";
+const ACCOUNT_NOT_INITIALIZED_CODE = "3012";
 
 export function sha256(input: string): Buffer {
   return createHash("sha256").update(input).digest();
@@ -80,6 +81,15 @@ function mapProgramError(error: unknown): Error {
 
   // Anchor custom errors start at 6000; these hex codes match the Rust program.
   if (combined.includes(ALREADY_REDEEMED_CODE) || combined.includes("AlreadyRedeemed")) {
+    return new Error("AlreadyRedeemed");
+  }
+
+  // In practice this can surface on a second redeem attempt if the voucher PDA
+  // lookup/simulation fails before our cleaner custom error bubbles up.
+  if (
+    combined.includes("AccountNotInitialized") ||
+    combined.includes(ACCOUNT_NOT_INITIALIZED_CODE)
+  ) {
     return new Error("AlreadyRedeemed");
   }
 

@@ -95,6 +95,7 @@ export default function VendorPage() {
   const [confirming, setConfirming] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const scannerRef = useRef<any>(null);
+  const scanHandledRef = useRef(false);
 
   const selectedVendor = vendors.find((vendor) => vendor.id === selectedVendorId);
   const vendorMeta = (category: string) =>
@@ -163,17 +164,23 @@ export default function VendorPage() {
   async function startScanner() {
     setScanning(true);
     setErrorMsg("");
+    scanHandledRef.current = false;
     const { Html5Qrcode } = await import("html5-qrcode");
     const scanner = new Html5Qrcode("qr-reader");
     scannerRef.current = scanner;
     try {
       await scanner.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: 220 },
+        {
+          fps: 10,
+          qrbox: 220,
+        },
         (text: string) => {
-          scanner.stop();
+          if (scanHandledRef.current) return;
+          scanHandledRef.current = true;
           setScanning(false);
-          handleQrData(text);
+          void scanner.stop().catch(() => {});
+          void handleQrData(text);
         },
         undefined,
       );
@@ -184,6 +191,7 @@ export default function VendorPage() {
   }
 
   async function stopScanner() {
+    scanHandledRef.current = false;
     if (scannerRef.current) {
       await scannerRef.current.stop().catch(() => {});
       scannerRef.current = null;
@@ -208,8 +216,8 @@ export default function VendorPage() {
       if (!res.ok) {
         if (data.code === "ALREADY_REDEEMED") {
           setAppState("double_redeem");
-          toast.error("Already Redeemed", {
-            description: "The blockchain prevented double-spending.",
+          toast.error("Already used", {
+            description: "This voucher has already been redeemed.",
           });
         } else {
           setErrorMsg(data.error || "Redemption failed");
@@ -422,6 +430,19 @@ export default function VendorPage() {
                         )}
 
                         <div id="qr-reader" className={scanning ? "h-full w-full overflow-hidden rounded-[28px]" : "hidden"} />
+
+                        {scanning && (
+                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                            <div className="relative -translate-y-4 h-56 w-56 rounded-[2rem] border border-white/15 bg-black/10 shadow-[0_0_0_9999px_rgba(2,6,23,0.18)]">
+                              <span className="absolute left-0 top-0 h-10 w-10 rounded-tl-[2rem] border-l-[3px] border-t-[3px] border-blue-300" />
+                              <span className="absolute right-0 top-0 h-10 w-10 rounded-tr-[2rem] border-r-[3px] border-t-[3px] border-blue-300" />
+                              <span className="absolute bottom-0 left-0 h-10 w-10 rounded-bl-[2rem] border-b-[3px] border-l-[3px] border-blue-300" />
+                              <span className="absolute bottom-0 right-0 h-10 w-10 rounded-br-[2rem] border-b-[3px] border-r-[3px] border-blue-300" />
+                              <div className="absolute inset-x-6 top-1/2 h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-blue-300/75 to-transparent" />
+                            </div>
+                            <p className="absolute bottom-8 text-sm font-medium text-white/80">Center the QR inside the frame</p>
+                          </div>
+                        )}
                       </div>
 
                       <div className="border-t border-white/8 px-5 py-4">
@@ -663,7 +684,7 @@ export default function VendorPage() {
                     <CircleAlert className="h-9 w-9" />
                   </div>
                   <p className="mt-6 text-xs font-semibold uppercase tracking-[0.24em] text-red-200/70">On-chain rejection</p>
-                  <h2 className="mt-3 text-5xl font-black tracking-tight text-white">Already redeemed</h2>
+                  <h2 className="mt-3 text-5xl font-black tracking-tight text-white">Already used</h2>
                   <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-red-100/75 md:text-base">
                     Someone already used this voucher. The duplicate attempt was blocked by the same Solana logic that protects the rest of the network.
                   </p>

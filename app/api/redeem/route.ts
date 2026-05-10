@@ -56,9 +56,14 @@ export async function POST(req: NextRequest) {
     try {
       chainResult = await redeemVoucherOnChain({ voucherId: voucher_id, vendorId: vendor_id });
     } catch (chainErr: unknown) {
-      if (chainErr instanceof Error && chainErr.message?.includes("AlreadyRedeemed")) {
+      if (
+        chainErr instanceof Error &&
+        (chainErr.message?.includes("AlreadyRedeemed") ||
+          chainErr.message?.includes("AccountNotInitialized") ||
+          chainErr.message?.includes("3012"))
+      ) {
         return NextResponse.json(
-          { error: "Already redeemed (on-chain)", code: "ALREADY_REDEEMED" },
+          { error: "Already used", code: "ALREADY_REDEEMED" },
           { status: 409 }
         );
       }
