@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
 
     // Update Supabase
     const now = new Date().toISOString();
-    await db
+    const { data: updatedRows, error: updateError } = await db
       .from("vouchers")
       .update({
         status: "redeemed",
@@ -75,7 +75,14 @@ export async function POST(req: NextRequest) {
         redeemed_at: now,
         on_chain_redeem_sig: chainResult.signature,
       })
-      .eq("id", voucher_id);
+      .eq("id", voucher_id)
+      .select("id, status");
+
+    if (updateError) {
+      console.error("Voucher status update failed:", updateError);
+      throw new Error(`DB update failed: ${updateError.message}`);
+    }
+    console.log(`[redeem] updated rows:`, JSON.stringify(updatedRows));
 
     // Increment vendor payout
     await db.rpc("increment_vendor_payout", {

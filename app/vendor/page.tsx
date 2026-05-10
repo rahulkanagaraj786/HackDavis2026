@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 
 type Vendor = { id: string; name: string; category: string; pending_payout_cents: number };
 type VoucherPreview = { id: string; category: string; value_cents: number; unit_count: number; status: string; expires_at: string };
@@ -37,11 +36,14 @@ export default function VendorPage() {
   const selectedVendor = vendors.find(v => v.id === selectedVendorId);
 
   useEffect(() => {
-    fetch("/api/orgs/vendors").then(r => r.json()).then(d => {
-      const list = d.vendors || [];
-      setVendors(list);
-      if (list.length > 0) setSelectedVendorId(list[0].id);
-    });
+    fetch("/api/orgs/vendors", { cache: "no-store" })
+      .then(r => r.json())
+      .then(d => {
+        const list = d.vendors || [];
+        setVendors(list);
+        if (list.length > 0) setSelectedVendorId(list[0].id);
+      })
+      .catch(() => toast.error("Could not load vendors"));
   }, []);
 
   function reset() {
@@ -96,10 +98,14 @@ export default function VendorPage() {
   async function confirmRedeem() {
     if (!voucherId || !claimToken || !selectedVendorId) return;
     setConfirming(true);
+    setErrorMsg("");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
     try {
       const res = await fetch("/api/redeem", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ voucher_id: voucherId, claim_token: claimToken, vendor_id: selectedVendorId }),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (!res.ok) {
@@ -115,7 +121,13 @@ export default function VendorPage() {
       setAppState("success");
       toast.success("Redeemed!", { description: <a href={data.explorer_url} target="_blank" rel="noopener noreferrer" className="underline">View on-chain proof →</a> });
       fetch("/api/orgs/vendors").then(r => r.json()).then(d => setVendors(d.vendors || []));
-    } finally { setConfirming(false); }
+    } catch (e: unknown) {
+      const msg = e instanceof Error && e.name === "AbortError" ? "Timed out — Solana may be slow. Try again." : (e instanceof Error ? e.message : "Network error");
+      setErrorMsg(msg);
+    } finally {
+      clearTimeout(timeout);
+      setConfirming(false);
+    }
   }
 
   const cat = preview ? (CAT[preview.category] ?? { icon: "🎟️", label: preview.category, dark: "from-slate-800 to-slate-800", glow: "", pill: "bg-white/10 text-white/60 border-white/10" }) : null;
@@ -151,14 +163,20 @@ export default function VendorPage() {
             </p>
           </div>
           {vendors.length > 1 && (
-            <Select value={selectedVendorId} onValueChange={v => v && setSelectedVendorId(v)}>
-              <SelectTrigger className="h-7 px-3 bg-white/15 border-white/20 text-white text-xs rounded-full w-auto">
-                <span className="pr-1">Switch</span>
-              </SelectTrigger>
-              <SelectContent>
-                {vendors.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <div className="flex gap-1.5 flex-wrap justify-end">
+              {vendors.map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => setSelectedVendorId(v.id)}
+                  className={`h-7 px-3 text-xs rounded-full border transition-all font-medium ${
+                    selectedVendorId === v.id
+                      ? "bg-white/25 border-white/40 text-white"
+                      : "bg-white/10 border-white/15 text-white/60 hover:bg-white/15 hover:text-white"
+                  }`}>
+                  {v.name}
+                </button>
+              ))}
+            </div>
           )}
         </div>
 
@@ -228,13 +246,32 @@ export default function VendorPage() {
             {/* Manual entry */}
             <div className="bg-slate-900 rounded-2xl border border-white/10 px-5 py-4">
               <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mb-3">Manual Entry</p>
-              <div className="flex gap-2">
+              <div className="space-y-2">
                 <Input value={manualCode} onChange={e => setManualCode(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleQrData(manualCode)}
-                  placeholder="Paste voucher URL or claim code..."
-                  className="bg-slate-800 border-slate-700 text-slate-200 placeholder:text-slate-600 text-sm rounded-xl" />
-                <Button onClick={() => handleQrData(manualCode)} variant="outline"
-                  className="border-slate-700 text-slate-300 hover:bg-slate-800 shrink-0 rounded-xl px-5">Go</Button>
+                  placeholder="Voucher ID (from card)"
+                  className="bg-slate-800 border-slate-700 text-slate-200 placeholder:text-slate-600 text-sm rounded-xl font-mono" />
+                <Input value={claimToken ?? ""} onChange={e => setClaimToken(e.target.value)}
+                  placeholder="Claim token (from card)"
+                  className="bg-slate-800 border-slate-700 text-slate-200 placeholder:text-slate-600 text-sm rounded-xl font-mono" />
+                <Button
+                  onClick={() => {
+                    if (manualCode && claimToken) {
+                      setVoucherId(manualCode.trim());
+                      fetch(`/api/vouchers/${manualCode.trim()}`, { cache: "no-store" })
+                        .then(r => r.json())
+                        .then(data => {
+                          if (data.error) { setErrorMsg(data.error); return; }
+                          setPreview(data);
+                          setAppState("preview");
+                        })
+                        .catch(() => setErrorMsg("Could not fetch voucher"));
+                    } else {
+                      setErrorMsg("Enter both the Voucher ID and Claim Token from the printed card.");
+                    }
+                  }}
+                  className="w-full gradient-brand text-white font-bold border-0 hover:opacity-90 rounded-xl py-5">
+                  Look Up Voucher
+                </Button>
               </div>
               {errorMsg && (
                 <div className="mt-3 flex items-center gap-2 bg-red-950/60 border border-red-800/50 rounded-lg px-3 py-2">
@@ -269,6 +306,13 @@ export default function VendorPage() {
                 </div>
               </div>
             </div>
+
+            {errorMsg && (
+              <div className="flex items-center gap-2 bg-red-950/60 border border-red-800/50 rounded-xl px-4 py-3">
+                <span className="text-red-400">⚠</span>
+                <p className="text-red-300 text-sm">{errorMsg}</p>
+              </div>
+            )}
 
             {preview.status !== "issued" ? (
               <div className="bg-amber-900/30 border border-amber-700/50 rounded-2xl p-5 text-center">

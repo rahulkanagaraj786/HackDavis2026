@@ -69,11 +69,13 @@ function mapProgramError(error: unknown): Error {
     return new Error("Solana transaction failed");
   }
 
-  const errorWithLogs = error as Error & { getLogs?: () => string[] | undefined };
-  const logs =
-    typeof errorWithLogs.getLogs === "function"
-      ? (errorWithLogs.getLogs() ?? []).join("\n")
-      : "";
+  const errorWithLogs = error as Error & { getLogs?: () => unknown };
+  const rawLogs = typeof errorWithLogs.getLogs === "function" ? errorWithLogs.getLogs() : undefined;
+  const logs = Array.isArray(rawLogs)
+    ? rawLogs.join("\n")
+    : typeof rawLogs === "string"
+    ? rawLogs
+    : "";
   const combined = `${error.message}\n${logs}`;
 
   // Anchor custom errors start at 6000; these hex codes match the Rust program.

@@ -19,7 +19,14 @@ export function getServiceClient(): SupabaseClient {
   if (!_serviceClient) {
     _serviceClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        global: {
+          // Bypass Next.js 14 fetch Data Cache — without this, Supabase's
+          // internal fetch calls get cached and reads return stale rows.
+          fetch: (url, options) => fetch(url, { ...options, cache: "no-store" }),
+        },
+      }
     );
   }
   return _serviceClient;

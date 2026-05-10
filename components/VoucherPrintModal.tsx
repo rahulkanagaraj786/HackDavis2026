@@ -14,6 +14,7 @@ type Props = {
     unit_count: number;
     expires_at: string;
     alias: string | null;
+    claim_token: string;
     qr_url: string;
   };
   orgName: string;
@@ -66,6 +67,10 @@ export default function VoucherPrintModal({ voucher, orgName, onClose }: Props) 
             <p className="text-xs text-gray-500 italic">{voucher.alias}</p>
           )}
 
+          <div className="border-t border-dashed border-gray-200 pt-3 text-left space-y-1">
+            <p className="text-xs text-gray-400 font-mono break-all"><span className="font-bold text-gray-500">ID:</span> {voucher.id}</p>
+            <p className="text-xs text-gray-400 font-mono break-all"><span className="font-bold text-gray-500">Token:</span> {voucher.claim_token}</p>
+          </div>
           <p className="text-xs text-gray-300">relief-ledger.vercel.app · Solana Devnet</p>
         </div>
 

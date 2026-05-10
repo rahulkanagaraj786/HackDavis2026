@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-relief_ledger = "Gv7VhiNDCSBhqjZVAgVRpDRXBoXfadBwaMzczGRfm4L"
+relief_ledger = "6Rsp9ftCT1DYRACKsNQTeevnQd6AeQZ7Cvj9Mq5QkETC"
 
 [registry]
 url = "https://api.apr.dev"
@@ -24,5 +24,5 @@ shutdown_wait = 2000
 upgradeable = false
 
 [[test.genesis]]
-address = "Gv7VhiNDCSBhqjZVAgVRpDRXBoXfadBwaMzczGRfm4L"
+address = "6Rsp9ftCT1DYRACKsNQTeevnQd6AeQZ7Cvj9Mq5QkETC"
 program = "programs/relief-ledger/target/deploy/relief_ledger.so"

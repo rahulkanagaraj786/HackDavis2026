@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { DEMO_ORGS, type DemoOrg } from "@/lib/demo-session";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import VoucherPrintModal from "@/components/VoucherPrintModal";
@@ -44,16 +43,23 @@ export default function AdminPage() {
     const org = DEMO_ORGS.find(o => o.cookieValue === cookieValue)!;
     setCurrentOrg(org);
     setFilter("all");
-    await fetch("/api/orgs/switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ org_cookie: cookieValue }) });
-    loadVouchers(org.id);
+    setVouchers([]);
+    fetch("/api/orgs/switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ org_cookie: cookieValue }) });
+    await loadVouchers(org.id);
   }
 
   async function loadVouchers(orgId: string) {
     setLoading(true);
-    const res = await fetch(`/api/vouchers?org_id=${orgId}`);
-    const data = await res.json();
-    setVouchers(data.vouchers || []);
-    setLoading(false);
+    try {
+      const res = await fetch(`/api/vouchers?org_id=${orgId}`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load vouchers");
+      setVouchers(data.vouchers || []);
+    } catch (err: unknown) {
+      toast.error("Could not load vouchers: " + (err instanceof Error ? err.message : "Network error"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function issueVoucher() {
@@ -67,7 +73,7 @@ export default function AdminPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setLastIssued(data);
-      loadVouchers(currentOrg.id);
+      await loadVouchers(currentOrg.id);
       toast.success("Confirmed on Solana", {
         description: <a href={data.explorer_url} target="_blank" rel="noopener noreferrer" className="underline text-blue-400">View transaction →</a>,
       });
@@ -76,7 +82,7 @@ export default function AdminPage() {
     } finally { setIssuing(false); }
   }
 
-  useEffect(() => { loadVouchers(currentOrg.id); }, [currentOrg.id]);
+  useEffect(() => { loadVouchers(DEMO_ORGS[0].id); }, []); // initial load only
 
   const orgGradient = currentOrg.color === "green" ? "gradient-green" : "gradient-orange";
   const counts = {
@@ -108,24 +114,19 @@ export default function AdminPage() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               Solana Devnet
             </div>
-            <Select value={currentOrg.cookieValue} onValueChange={v => v && switchOrg(v)}>
-              <SelectTrigger className="w-52 h-9 text-sm bg-slate-800 border-white/10 text-slate-200">
-                <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${currentOrg.color === "green" ? "bg-green-400" : "bg-orange-400"}`} />
-                  <SelectValue />
-                </div>
-              </SelectTrigger>
-              <SelectContent>
-                {DEMO_ORGS.map(org => (
-                  <SelectItem key={org.cookieValue} value={org.cookieValue}>
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${org.color === "green" ? "bg-green-400" : "bg-orange-400"}`} />
-                      {org.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex gap-1.5">
+              {DEMO_ORGS.map(org => (
+                <button key={org.cookieValue} onClick={() => switchOrg(org.cookieValue)}
+                  className={`flex items-center gap-2 h-9 px-4 rounded-lg text-sm font-medium border transition-all ${
+                    currentOrg.cookieValue === org.cookieValue
+                      ? "bg-white/15 border-white/20 text-white"
+                      : "bg-slate-800 border-white/10 text-slate-400 hover:bg-slate-700 hover:text-slate-200"
+                  }`}>
+                  <div className={`w-2 h-2 rounded-full ${org.color === "green" ? "bg-green-400" : "bg-orange-400"}`} />
+                  {org.name}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </header>

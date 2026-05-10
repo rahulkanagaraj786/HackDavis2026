@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("Gv7VhiNDCSBhqjZVAgVRpDRXBoXfadBwaMzczGRfm4L");
+declare_id!("6Rsp9ftCT1DYRACKsNQTeevnQd6AeQZ7Cvj9Mq5QkETC");
 
 #[program]
 pub mod relief_ledger {
