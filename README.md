@@ -2,6 +2,10 @@
 
 Relief Ledger is a dignity-first aid voucher platform built for HackDavis 2026. Nonprofits issue anonymous QR vouchers for meals, hygiene, transit, and laundry. Vendors redeem them once. Solana provides a shared source of truth across organizations without putting recipient identity on-chain.
 
+## Live Demo
+
+- Production: [https://relief-ledger.vercel.app](https://relief-ledger.vercel.app)
+
 ## Stack
 
 - Next.js 14 + TypeScript + Tailwind
@@ -79,7 +83,11 @@ After deploy:
 
 ## Deploying the Web App
 
-Import the repo into Vercel and set:
+The current production deployment is:
+
+- [https://relief-ledger.vercel.app](https://relief-ledger.vercel.app)
+
+For a fresh deploy, import the repo into Vercel and set:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
